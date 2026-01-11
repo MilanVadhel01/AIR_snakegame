@@ -1,5 +1,7 @@
 import pygame
 import random
+import argparse
+import sys
 
 # Window settings
 WINDOW_WIDTH = 600
@@ -14,16 +16,49 @@ WHITE = (255, 255, 255)
 GREEN = (0, 200, 0)
 DARK_GREEN = (0, 150, 0)
 RED = (255, 50, 50)
+BLUE = (50, 150, 255)
 
 # Game speed
 FPS = 10
 
+# Parse arguments
+parser = argparse.ArgumentParser(description='Snake Game with optional gesture control')
+parser.add_argument('--gesture', action='store_true', help='Enable hand gesture control')
+args = parser.parse_args()
+
+# Initialize gesture control if enabled
+gesture_mode = args.gesture
+cap = None
+detector = None
+gesture = None
+
+if gesture_mode:
+    try:
+        import cv2
+        from hand_tracking import HandDetector
+        from gesture_controller import GestureController
+        
+        cap = cv2.VideoCapture(0)
+        detector = HandDetector()
+        gesture = GestureController()
+        print("🖐️ Gesture mode enabled! Use your hand to control the snake.")
+    except ImportError as e:
+        print(f"Warning: Could not import gesture modules: {e}")
+        print("Falling back to keyboard mode.")
+        gesture_mode = False
+    except Exception as e:
+        print(f"Warning: Could not initialize camera: {e}")
+        print("Falling back to keyboard mode.")
+        gesture_mode = False
+
 # Initialize Pygame
 pygame.init()
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-pygame.display.set_caption("🐍 Snake Game - Arrow Keys")
+title = "🐍 Snake Game - Gesture Control" if gesture_mode else "🐍 Snake Game - Arrow Keys"
+pygame.display.set_caption(title)
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
+small_font = pygame.font.Font(None, 24)
 
 def reset_game():
     """Reset game to initial state"""
@@ -33,10 +68,6 @@ def reset_game():
     score = 0
     return snake, direction, food, score
 
-def quit_game():
-    pygame.quit()
-    sys.exit()
-
 def spawn_food(snake):
     """Spawn food at random position not on snake"""
     while True:
@@ -44,7 +75,7 @@ def spawn_food(snake):
         if food not in snake:
             return food
 
-def draw_game(snake, food, score, game_over):
+def draw_game(snake, food, score, game_over, current_gesture=None):
     """Draw all game elements"""
     # Clear screen
     screen.fill(BLACK)
@@ -65,6 +96,16 @@ def draw_game(snake, food, score, game_over):
     score_text = font.render(f"Score: {score}", True, WHITE)
     screen.blit(score_text, (10, 10))
     
+    # Draw mode indicator
+    if gesture_mode:
+        mode_text = small_font.render("🖐️ Gesture Mode", True, BLUE)
+        screen.blit(mode_text, (WINDOW_WIDTH - 130, 10))
+        
+        # Show current gesture direction
+        if current_gesture:
+            gesture_text = small_font.render(f"Direction: {current_gesture}", True, WHITE)
+            screen.blit(gesture_text, (WINDOW_WIDTH - 130, 35))
+    
     # Draw game over screen
     if game_over:
         game_over_text = font.render("GAME OVER! R=Restart, Q=Quit", True, WHITE)
@@ -76,12 +117,43 @@ def draw_game(snake, food, score, game_over):
 
 def main():
     """Main game loop"""
+    global cap, detector, gesture
+    
     snake, direction, food, score = reset_game()
     game_over = False
     running = True
+    current_gesture = None
     
     while running:
-        # Handle events
+        # Handle gesture input
+        if gesture_mode and cap and not game_over:
+            success, frame = cap.read()
+            if success:
+                import cv2
+                frame = cv2.flip(frame, 1)  # Mirror the image
+                frame, landmarks = detector.find_hands(frame)
+                
+                if landmarks:
+                    finger_pos = detector.get_finger_positions(landmarks)
+                    gesture_dir = gesture.get_direction(finger_pos)
+                    current_gesture = gesture_dir
+                    
+                    # Map gesture to direction
+                    if gesture_dir == 'UP' and direction != (0, 1):
+                        direction = (0, -1)
+                    elif gesture_dir == 'DOWN' and direction != (0, -1):
+                        direction = (0, 1)
+                    elif gesture_dir == 'LEFT' and direction != (1, 0):
+                        direction = (-1, 0)
+                    elif gesture_dir == 'RIGHT' and direction != (-1, 0):
+                        direction = (1, 0)
+                
+                # Show webcam feed
+                cv2.imshow('Hand Tracking - Press Q to quit', frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    running = False
+        
+        # Handle keyboard events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -91,10 +163,11 @@ def main():
                     if event.key == pygame.K_r:
                         snake, direction, food, score = reset_game()
                         game_over = False
+                        current_gesture = None
                     elif event.key == pygame.K_q:
                         running = False
                 else:
-                    # Arrow key controls
+                    # Arrow key controls (always available as fallback)
                     if event.key == pygame.K_UP and direction != (0, 1):
                         direction = (0, -1)
                     elif event.key == pygame.K_DOWN and direction != (0, -1):
@@ -130,10 +203,17 @@ def main():
                     snake.pop()  # Remove tail
         
         # Draw everything
-        draw_game(snake, food, score, game_over)
+        draw_game(snake, food, score, game_over, current_gesture)
         
         # Cap frame rate
         clock.tick(FPS)
+    
+    # Cleanup
+    if gesture_mode and cap:
+        import cv2
+        cap.release()
+        detector.release()
+        cv2.destroyAllWindows()
     
     pygame.quit()
 
