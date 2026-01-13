@@ -19,7 +19,7 @@ RED = (255, 50, 50)
 BLUE = (50, 150, 255)
 
 # Game speed
-FPS = 10
+FPS = 5
 
 # Parse arguments
 parser = argparse.ArgumentParser(description='Snake Game with optional gesture control')
